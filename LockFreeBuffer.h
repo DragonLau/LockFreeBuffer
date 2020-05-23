@@ -17,7 +17,7 @@ struct LockFreeBuffer
 		_alloc_count = 0;
 		_read_count = 0;
 		_write_count = 0;
-		_used_count = 0;
+		_idle_count = _capacity;
 	}
 	~LockFreeBuffer()
 	{
@@ -26,12 +26,12 @@ struct LockFreeBuffer
 
 	bool Push(const char* data, size_t len)
 	{
-		if (data == nullptr || len == 0 || len > _capacity || _used_count >= _capacity)
+		if (data == nullptr || len == 0 || len > _capacity)
 		{
 			return false;
 		}
-		auto used = _used_count.fetch_add(len);
-		if (used + len <= _capacity)
+		auto idle = _idle_count.fetch_sub(len);
+		if (idle >= len)
 		{
 			// 1.申请写入空间
 			auto alloc_start = _alloc_count.fetch_add(len);
@@ -64,7 +64,7 @@ struct LockFreeBuffer
 		}
 		else
 		{
-			_used_count.fetch_sub(len);
+			_idle_count.fetch_add(len);
 			return false;
 		}
 
@@ -94,7 +94,7 @@ struct LockFreeBuffer
 		if (_read_count + len <= _write_count)
 		{
 			_read_count += len;
-			_used_count.fetch_sub(len);
+			_idle_count.fetch_add(len);
 			return true;
 		}
 		return false;
@@ -102,10 +102,10 @@ struct LockFreeBuffer
 
 
 	char *_buffer;
+	int64_t _read_count;
 	std::atomic_ullong _alloc_count;
-	unsigned long long _read_count;
 	std::atomic_ullong _write_count;
-	std::atomic_ullong _used_count;// 避免溢出的问题使用已用空间 而不用剩余空间
-	unsigned long long _capacity;
-	unsigned long long _capacity_mask;
+	std::atomic_llong _idle_count;
+	size_t _capacity;
+	size_t _capacity_mask;
 };
